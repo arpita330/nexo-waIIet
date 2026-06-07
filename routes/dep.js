@@ -4,10 +4,10 @@ const Deposit = require('../models/dep');
 const User = require('../models/User');
 const axios = require('axios');
 
-const FAMPAY_UPI = "sumitgausevaksangh@fam";
+const FAMPAY_UPI = "rohit.1474@superyes";
 const FAMPAY_NAME = "UNIO Wallet";
-const BOT_TOKEN = process.env.BOT_TOKEN || "7507385917:AAG3MmJO2VlzJAfvyjKeu_hqfQ0F3dCztow";
-const ADMIN_TG_ID = "8509393869";
+const BOT_TOKEN = process.env.BOT_TOKEN || "8999528684:AAEyfj2NXo78aLinxZ-HzK6eZb6ur-PUJ6o";
+const ADMIN_TG_ID = "8369423600";
 
 // ── GAS se payment receive ──
 router.post('/receive', async (req, res) => {
