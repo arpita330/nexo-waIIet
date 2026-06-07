@@ -3,9 +3,9 @@ const mongoose = require('mongoose');
 const jwt      = require('jsonwebtoken');
 const User     = require('../models/User');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'unio_secret_2026';
-const BOT_TOKEN  = process.env.BOT_TOKEN  || '7507385917:AAG3MmJO2VlzJAfvyjKeu_hqfQ0F3dCztow';
-const ADMIN_TG   = '8509393869';
+const JWT_SECRET = process.env.JWT_SECRET || 'k9xjtwX5rP2mQ8vR4sT7wY3uA1fD6gH9jK2lZ5nM';
+const BOT_TOKEN  = process.env.BOT_TOKEN  || '8999528684:AAEyfj2NXo78aLinxZ-HzK6eZb6ur-PUJ6o';
+const ADMIN_TG   = '8369423600';
 
 // OTP store (in-memory, resets on server restart)
 const otpStore     = {};  // for register
