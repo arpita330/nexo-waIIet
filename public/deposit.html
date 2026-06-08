@@ -273,35 +273,6 @@ body {
   font-size: 1.2rem;
 }
 
-/* session expired overlay (soft modal) */
-.session-banner {
-  position: fixed;
-  bottom: 80px;
-  left: 50%;
-  transform: translateX(-50%);
-  background: #1e293b;
-  color: white;
-  padding: 0.75rem 1.25rem;
-  border-radius: 2rem;
-  font-size: 0.75rem;
-  font-weight: 600;
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  z-index: 200;
-  box-shadow: 0 8px 20px rgba(0,0,0,0.2);
-  backdrop-filter: blur(4px);
-  white-space: nowrap;
-}
-.session-banner a {
-  color: #ffb347;
-  text-decoration: underline;
-  margin-left: 0.25rem;
-}
-@media (max-width: 480px) {
-  .session-banner { font-size: 0.65rem; white-space: normal; width: 90%; text-align: center; justify-content: center; flex-wrap: wrap; }
-}
-
 .loading-spinner {
   display: inline-block;
   width: 14px;
@@ -397,23 +368,32 @@ body {
 <script>
 // CONFIGURATION
 const API = 'https://nexo-waiiet.vercel.app/';
+let sessionWarningShown = false; // Prevent multiple warning banners
+let tokenVerified = false; // Track if we've already verified token successfully
 
-// Helper: get token with validation
+// Helper: get token
 function getValidToken() {
   const token = localStorage.getItem('token');
-  if (!token || token === 'null' || token === 'undefined') return null;
+  if (!token || token === 'null' || token === 'undefined' || token === '') return null;
   return token;
 }
 
-// Enhanced token verification + expiration handler
-async function verifyTokenAndRedirect() {
+// Get current user
+function getCurrentUser() {
+  try {
+    const userStr = localStorage.getItem('user');
+    if (userStr && userStr !== 'null' && userStr !== 'undefined') {
+      return JSON.parse(userStr);
+    }
+  } catch(e) {}
+  return null;
+}
+
+// Silent token check - doesn't show warnings, just returns boolean
+async function silentTokenCheck() {
   const token = getValidToken();
-  if (!token) {
-    redirectToLogin('Session expired. Please login again.');
-    return false;
-  }
+  if (!token) return false;
   
-  // Optional: verify token with backend (lightweight ping)
   try {
     const response = await fetch(API + '/auth/me', {
       method: 'GET',
@@ -423,69 +403,129 @@ async function verifyTokenAndRedirect() {
       }
     });
     
-    if (!response.ok) {
-      // Token invalid or expired (401, 403)
-      if (response.status === 401 || response.status === 403) {
-        clearInvalidTokenAndRedirect();
-        return false;
+    if (response.ok) return true;
+    if (response.status === 401 || response.status === 403) return false;
+    return true; // For other errors, assume token might still work
+  } catch (err) {
+    // Network error during silent check - don't bug user, assume token is fine
+    console.log('Silent token check network issue, assuming valid:', err.message);
+    return true;
+  }
+}
+
+// Critical token check - only called when necessary (before submission or on page load)
+async function criticalTokenCheck(showWarningOnFailure = true) {
+  const token = getValidToken();
+  if (!token) {
+    if (showWarningOnFailure) redirectToLogin('Session expired. Please login again.');
+    return false;
+  }
+  
+  try {
+    const response = await fetch(API + '/auth/me', {
+      method: 'GET',
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Content-Type': 'application/json'
       }
-      // Other server error but token might still be valid? We'll assume it's risky, but allow limited actions? 
-      // For safety, still show warning but don't block UI completely? Let's allow but show warning.
-      showSessionWarning("Token verification failed. Re-login recommended.");
-      return true;
-    }
-    const data = await response.json();
-    if (data.status !== 'success') {
-      clearInvalidTokenAndRedirect();
+    });
+    
+    if (response.ok) {
+      const data = await response.json();
+      if (data.status === 'success') return true;
       return false;
     }
-    return true;
+    
+    if (response.status === 401 || response.status === 403) {
+      if (showWarningOnFailure) clearInvalidTokenAndRedirect();
+      return false;
+    }
+    
+    return true; // Server error but token might still be valid
   } catch (err) {
-    // Network error / offline case: we don't block user completely but show warning
-    console.warn('Auth verification network error:', err);
-    showSessionWarning("Network issue - could not verify session. If you see issues, login again.");
-    return true; // allow but with caution
+    // Network error during critical check - show different message
+    console.warn('Token verification network error:', err);
+    if (showWarningOnFailure) {
+      showNetworkWarning("Network issue - Please check your connection and try again.");
+    }
+    return true; // Don't block user due to network issues, let them try submission
   }
 }
 
 function clearInvalidTokenAndRedirect() {
   localStorage.removeItem('token');
   localStorage.removeItem('user');
-  redirectToLogin('Your session has expired or token is invalid. Please login again.');
+  redirectToLogin('Your session has expired. Please login again.');
 }
 
 function redirectToLogin(message) {
-  // Store message in sessionStorage to show on login page if needed
   sessionStorage.setItem('auth_error', message);
   window.location.href = 'index.html';
 }
 
-function showSessionWarning(msg) {
-  // Avoid duplicate banners
-  if (document.querySelector('.session-banner')) return;
+// Show temporary network warning (not a persistent session error)
+function showNetworkWarning(msg) {
+  const existingWarnings = document.querySelectorAll('.network-toast');
+  existingWarnings.forEach(w => w.remove());
+  
+  const toast = document.createElement('div');
+  toast.className = 'network-toast';
+  toast.style.cssText = 'position:fixed; bottom:80px; left:50%; transform:translateX(-50%); background:#f59e0b; color:white; padding:0.6rem 1.2rem; border-radius:2rem; font-size:0.7rem; font-weight:600; z-index:200; box-shadow:0 4px 12px rgba(0,0,0,0.15); backdrop-filter:blur(4px); white-space:nowrap;';
+  toast.innerHTML = `<i class="fa-solid fa-wifi"></i> ${msg}`;
+  document.body.appendChild(toast);
+  
+  setTimeout(() => {
+    if (toast && toast.remove) toast.remove();
+  }, 4000);
+}
+
+// Show session warning only when token is actually invalid
+function showSessionWarningIfNeeded() {
+  if (sessionWarningShown) return;
+  
+  const token = getValidToken();
+  if (!token) {
+    sessionWarningShown = true;
+    const banner = createSessionBanner('Session not found. Please login to continue.');
+    document.body.appendChild(banner);
+    return;
+  }
+  
+  // Only show if token is clearly invalid after background check
+  silentTokenCheck().then(isValid => {
+    if (!isValid && !sessionWarningShown) {
+      sessionWarningShown = true;
+      const banner = createSessionBanner('Your session has expired. Please login again.');
+      document.body.appendChild(banner);
+    }
+  }).catch(() => {
+    // Don't show banner on network errors
+  });
+}
+
+function createSessionBanner(message) {
   const banner = document.createElement('div');
   banner.className = 'session-banner';
-  banner.innerHTML = `<i class="fa-solid fa-shield-haltered"></i> ${msg} <a href="index.html" id="bannerLoginBtn">Login Now</a>`;
-  document.body.appendChild(banner);
+  banner.style.cssText = 'position:fixed; bottom:80px; left:50%; transform:translateX(-50%); background:#1e293b; color:white; padding:0.7rem 1.2rem; border-radius:2rem; font-size:0.7rem; font-weight:600; display:flex; align-items:center; gap:0.75rem; z-index:200; box-shadow:0 8px 20px rgba(0,0,0,0.2); backdrop-filter:blur(4px);';
+  banner.innerHTML = `<i class="fa-solid fa-shield-haltered"></i> ${message} <a href="index.html" style="color:#ffb347; text-decoration:underline; margin-left:0.25rem;">Login Now</a>`;
   
-  // Auto remove after 8 seconds
-  setTimeout(() => {
-    if (banner && banner.remove) banner.remove();
-  }, 8000);
-  
-  // Attach event to link inside banner
-  const loginLink = document.getElementById('bannerLoginBtn');
+  const loginLink = banner.querySelector('a');
   if (loginLink) {
     loginLink.addEventListener('click', (e) => {
       e.preventDefault();
       localStorage.removeItem('token');
+      localStorage.removeItem('user');
       window.location.href = 'index.html';
     });
   }
+  
+  // Auto remove after 10 seconds
+  setTimeout(() => {
+    if (banner && banner.remove) banner.remove();
+  }, 10000);
+  
+  return banner;
 }
-
-// Global flag to avoid parallel submissions
-let isSubmitting = false;
 
 function copyUPI() {
   const upiText = 'sumitsharmaji001@ptyes';
@@ -500,17 +540,19 @@ function showMsg(text, type) {
   const m = document.getElementById('msg');
   m.textContent = text;
   m.className = 'msg ' + type;
-  // Auto hide success/error after 5 seconds
+  m.style.display = 'block';
+  
   setTimeout(() => {
-    if (m.className.includes('msg') && !m.className.includes('permanent')) {
+    if (m.style.display === 'block') {
       m.style.display = 'none';
       m.className = 'msg';
     }
   }, 5000);
 }
 
+let isSubmitting = false;
+
 async function submitUTR() {
-  // Client-side token double check before proceeding
   const token = getValidToken();
   if (!token) {
     redirectToLogin('Please login to submit payment details.');
@@ -534,11 +576,10 @@ async function submitUTR() {
   if (isNaN(amountNum) || amountNum < 1) return showMsg('Minimum ₹1 required!', 'error');
   if (amountNum > 500000) return showMsg('Amount exceeds limit (₹5,00,000 max)', 'error');
   
-  // Optional: UTR pattern suggestion (alphanumeric)
-  const utrClean = utr.replace(/\s/g, '');
-  if (utrClean.length === 0) return showMsg('Invalid UTR format', 'error');
+  // Critical: verify token before submission (only on submission, not on page load)
+  const isTokenValid = await criticalTokenCheck(true);
+  if (!isTokenValid) return;
   
-  // Disable button & show loading
   const btn = document.getElementById('submitBtn');
   const originalBtnHTML = btn.innerHTML;
   btn.innerHTML = '<span class="loading-spinner"></span> Verifying...';
@@ -546,17 +587,15 @@ async function submitUTR() {
   isSubmitting = true;
   
   try {
-    // Additional API call to ensure token hasn't been invalidated mid-flight
     const response = await fetch(API + '/wallet/deposit-request', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': 'Bearer ' + token
       },
-      body: JSON.stringify({ utr: utrClean, amount: amountNum })
+      body: JSON.stringify({ utr: utr.trim(), amount: amountNum })
     });
     
-    // Handle 401 Unauthorized specifically -> token expired/invalid
     if (response.status === 401 || response.status === 403) {
       clearInvalidTokenAndRedirect();
       return;
@@ -567,9 +606,7 @@ async function submitUTR() {
       showMsg('✅ Request submitted! Admin will verify and add balance shortly.', 'success');
       utrInput.value = '';
       amountInput.value = '';
-      // Optionally trigger a small delay to reset UI
     } else {
-      // Server error message handling (e.g. duplicate UTR, invalid reference)
       let errorMsg = data.message || 'Submission failed!';
       if (errorMsg.toLowerCase().includes('token') || errorMsg.toLowerCase().includes('unauthorized')) {
         clearInvalidTokenAndRedirect();
@@ -579,7 +616,6 @@ async function submitUTR() {
     }
   } catch (e) {
     console.error('API error:', e);
-    // Network error handling: token might still be valid, but server unreachable.
     if (e.name === 'TypeError' || e.message.includes('fetch')) {
       showMsg('Network error! Check your connection and try again.', 'error');
     } else {
@@ -592,94 +628,109 @@ async function submitUTR() {
   }
 }
 
-// Intercept all navigation links to perform token validation before leaving
+// Navigation protection - only check token presence, not network verification
 function setupSecureNavigation() {
-  const navLinks = [
-    { element: document.getElementById('backLink'), href: 'dashboard.html' },
-    { element: document.getElementById('navHome'), href: 'dashboard.html' },
-    { element: document.getElementById('navSend'), href: 'transfer.html' },
-    { element: document.getElementById('navWithdraw'), href: 'withdraw.html' },
-    { element: document.getElementById('navLifafa'), href: 'lifafa.html' }
+  const protectedPages = ['dashboard.html', 'transfer.html', 'withdraw.html', 'lifafa.html'];
+  
+  const navElements = [
+    document.getElementById('backLink'),
+    document.getElementById('navHome'),
+    document.getElementById('navSend'),
+    document.getElementById('navWithdraw'),
+    document.getElementById('navLifafa')
   ];
   
-  // Also add any other potential .nav-item or .back not covered
-  navLinks.forEach(link => {
-    if (link.element) {
-      link.element.addEventListener('click', (e) => {
-        const token = getValidToken();
-        if (!token) {
-          e.preventDefault();
-          redirectToLogin('Please login to access this page.');
+  navElements.forEach(el => {
+    if (el && el.tagName === 'A') {
+      el.addEventListener('click', (e) => {
+        const href = el.getAttribute('href');
+        if (href && protectedPages.some(page => href.includes(page))) {
+          const token = getValidToken();
+          if (!token) {
+            e.preventDefault();
+            redirectToLogin('Please login to access this page.');
+          }
         }
-        // If token exists but might be stale: we don't block navigation, but we rely on page protection
-        // However we can fire a background check? Not needed for UX.
       });
     }
   });
-  
-  // Additional safety: protect "Add" page itself - if token missing, redirect immediately
-  if (!getValidToken()) {
-    redirectToLogin('Authentication required. Please login.');
-    return false;
-  }
-  return true;
 }
 
-// Main initialization with token verification
+// Initialize page - SILENT token check (no annoying banners)
 async function initPage() {
-  // Check token presence first
-  const tokenExists = getValidToken();
-  if (!tokenExists) {
+  const token = getValidToken();
+  if (!token) {
     redirectToLogin('Please login to access Add Money page.');
     return;
   }
   
-  // Show loading state msg temporarily while verifying?
-  const msgDiv = document.getElementById('msg');
-  msgDiv.style.display = 'none';
+  // Do a silent background check - don't show any warnings to user
+  // This ensures we don't spam the "Network issue" message
+  try {
+    const response = await fetch(API + '/auth/me', {
+      method: 'GET',
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    if (response.status === 401 || response.status === 403) {
+      clearInvalidTokenAndRedirect();
+      return;
+    }
+    
+    // Even if network fails, we don't show warning - let user try submission
+    // Only on actual 401/403 we redirect
+  } catch (err) {
+    // Network error during page load - completely silent, don't annoy user
+    console.log('Background token check skipped due to network:', err.message);
+    // Page still works, submission will check again
+  }
   
-  // Verify token validity with backend (enhanced)
-  const isValid = await verifyTokenAndRedirect();
-  if (!isValid) return; // already redirected
-  
-  // After successful verification, attach navigation protections
+  // Set up navigation protection
   setupSecureNavigation();
   
-  // Additional: add auto logout on storage event (if token cleared from another tab)
+  // Listen for token changes from other tabs
   window.addEventListener('storage', (event) => {
     if (event.key === 'token' && !event.newValue) {
       redirectToLogin('Session terminated in another tab.');
     }
   });
   
-  // Also handle manual removal: watch for visibility change (optional)
+  // Optional: prefill user info if needed (no warnings)
+  const user = getCurrentUser();
+  if (user && user.name) {
+    // Just for UX, no action needed
+  }
 }
 
-// Execute initialization
+// Start the app - no banners on load
 initPage().catch(err => {
-  console.error('Init error', err);
-  // fallback redirect if something weird
-  if (!getValidToken()) redirectToLogin('Authentication error.');
+  console.error('Init error:', err);
+  // Only redirect if token is definitely missing
+  if (!getValidToken()) {
+    redirectToLogin('Authentication required.');
+  }
 });
 
-// Make copyUPI and submitUTR globally available
+// Expose global functions
 window.copyUPI = copyUPI;
 window.submitUTR = submitUTR;
 
-// Add an extra helper: if the user clicks on any internal link that not covered yet, safeguard
+// Extra protection for all internal links
 document.addEventListener('click', (e) => {
-  let target = e.target.closest('a');
-  if (target && target.href && !target.href.startsWith('javascript:') && target.getAttribute('href') !== '#') {
-    const url = new URL(target.href);
-    // Only intercept same-origin links to dashboard/transfer/withdraw/lifafa type
+  const target = e.target.closest('a');
+  if (target && target.href && !target.href.startsWith('javascript:')) {
+    const url = new URL(target.href, window.location.href);
     if (url.origin === window.location.origin) {
-      const allowedPaths = ['dashboard.html', 'transfer.html', 'withdraw.html', 'lifafa.html', 'deposit.html'];
       const pathname = url.pathname.split('/').pop();
-      if (allowedPaths.includes(pathname) && pathname !== 'deposit.html') {
+      const protectedPaths = ['dashboard.html', 'transfer.html', 'withdraw.html', 'lifafa.html', 'deposit.html'];
+      if (protectedPaths.includes(pathname) && pathname !== 'deposit.html') {
         const token = getValidToken();
         if (!token) {
           e.preventDefault();
-          redirectToLogin('Session missing. Please login.');
+          redirectToLogin('Please login to continue.');
         }
       }
     }
