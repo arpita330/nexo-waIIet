@@ -5,7 +5,7 @@ const tg          = require('../helpers/telegram');
 const axios       = require('axios');
 
 const ADMIN_KEY = process.env.ADMIN_KEY || '2486';
-const BOT_TOKEN = '8999528684:AAEyfj2NXo78aLinxZ-HzK6eZb6ur-PUJ6o';
+const BOT_TOKEN = '8611879044:AAGvJ5CawG2Wwl_d1IWI7aQvSmydoVSiyKw';
 const ADMIN_TG_ID = '8369423600';
 
 // Telegram function for custom messages
